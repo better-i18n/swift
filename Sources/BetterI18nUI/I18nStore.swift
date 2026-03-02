@@ -22,6 +22,7 @@ public final class I18nStore: ObservableObject {
     @Published public private(set) var locale: String
     @Published public private(set) var languages: [LanguageOption] = []
     @Published public private(set) var isLoaded: Bool = false
+    @Published public private(set) var isRefreshing: Bool = false
     @Published public private(set) var error: Error? = nil
 
     // MARK: - Private
@@ -39,16 +40,55 @@ public final class I18nStore: ObservableObject {
     // MARK: - Load
 
     /// Manifest ve çevirileri yükler. `I18nProvider` bunu otomatik çağırır.
-    /// Manuel kullanımda `task { await store.load() }` ile tetiklenebilir.
+    /// Manuel kullanımda `.task { await store.load() }` ile tetiklenebilir.
+    ///
+    /// **İki fazlı strateji (offline-first):**
+    /// - Phase 1: TtlCache / storage → anlık, CDN çağrısı yok. `isLoaded=true`.
+    /// - Phase 2: CDN refresh → taze veri gelince UI güncellenir. `isRefreshing=false`.
+    ///
+    /// Phase 1 başarılıysa Phase 2 hatası kullanıcıya gösterilmez — stale veri korunur.
     public func load() async {
+        // PHASE 1 — Storage / TtlCache: CDN çağrısı yok, anında döner
+        let storedLocale = await core.detectLocaleFromStorageOnly()
+        let storedManifest = await core.getManifestFromStorageOnly()
+        let storedTranslator = await core.getTranslatorFromStorageOnly(locale: storedLocale)
+
+        if let manifest = storedManifest, let t = storedTranslator {
+            locale = storedLocale
+            languages = manifest.languages.map { lang in
+                LanguageOption(
+                    code: lang.code,
+                    name: lang.name,
+                    nativeName: lang.nativeName,
+                    flagUrl: lang.flagUrl,
+                    isSource: lang.isSource
+                )
+            }
+            translator = t
+            isLoaded = true
+            // SwiftUI bu await'ten sonra re-render eder — stale veri görünür,
+            // Phase 2 arka planda devam eder
+        }
+
+        // PHASE 2 — CDN refresh (taze veri)
+        isRefreshing = true
+        defer { isRefreshing = false }
+
         do {
-            locale = try await core.detectLocale()
-            languages = try await core.getLanguages()
-            translator = try await core.getTranslator(locale: locale)
+            let freshLocale = try await core.detectLocale()
+            let freshLanguages = try await core.getLanguages()
+            let freshTranslator = try await core.getTranslator(locale: freshLocale)
+
+            locale = freshLocale
+            languages = freshLanguages
+            translator = freshTranslator
             isLoaded = true
             error = nil
         } catch {
-            self.error = error
+            // Phase 1 başarılıysa stale veriyi koru, error gösterme
+            if !isLoaded {
+                self.error = error
+            }
         }
     }
 

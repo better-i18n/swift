@@ -169,6 +169,40 @@ public final class BetterI18n: @unchecked Sendable {
         await storage.set(prefKey, value: locale)
     }
 
+    // MARK: - Storage-Only API (CDN'e gitmez)
+
+    /// TtlCache veya storage'dan manifest döner. CDN çağrısı yapmaz.
+    ///
+    /// İki fazlı load için: Phase 1'de bu metod çağrılır — offline/hızlı yol.
+    public func getManifestFromStorageOnly() async -> ManifestResponse? {
+        let cacheKey = "\(config.cdnBaseUrl)|\(config.project)"
+        if let cached = await manifestCache.get(cacheKey) { return cached }
+        return await loadManifestFromStorage()
+    }
+
+    /// TtlCache veya storage'dan messages döner. CDN çağrısı yapmaz.
+    public func getMessagesFromStorageOnly(locale: String) async -> [String: Any]? {
+        let cacheKey = "\(config.cdnBaseUrl)|\(config.project)|\(locale)"
+        if let cached = await messagesCache.get(cacheKey) { return cached }
+        return await loadMessagesFromStorage(locale: locale)
+    }
+
+    /// Storage'dan `Translator` döner. CDN'e gitmez.
+    ///
+    /// `Translator.init` internal erişim seviyesinde olduğu için BetterI18nUI
+    /// direkt oluşturamaz — bu factory method şart.
+    public func getTranslatorFromStorageOnly(locale: String) async -> Translator? {
+        guard let messages = await getMessagesFromStorageOnly(locale: locale) else { return nil }
+        return Translator(messages: messages, locale: locale)
+    }
+
+    /// Storage'daki locale tercihini döner. Yoksa `defaultLocale`. CDN'e gitmez.
+    public func detectLocaleFromStorageOnly() async -> String {
+        let prefKey = "@better-i18n:locale:\(config.project)"
+        if let saved = await storage.get(prefKey), !saved.isEmpty { return saved }
+        return config.defaultLocale
+    }
+
     // MARK: - Private Helpers
 
     private func persistManifest(_ manifest: ManifestResponse) async {

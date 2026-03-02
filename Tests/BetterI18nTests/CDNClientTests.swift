@@ -193,6 +193,63 @@ final class CDNClientTests: XCTestCase {
         XCTAssertNotNil(languages[1].flagUrl)
     }
 
+    // MARK: - Storage-Only Methods
+
+    func testStorageOnlyMethods() async throws {
+        // Storage'a önceden manifest + messages yaz — CDN'e hiç gidilmemeli
+        let mockStorage = MockStorage()
+
+        let manifest = ManifestResponse(
+            projectSlug: "safa",
+            sourceLanguage: "tr",
+            languages: [ManifestLanguage(
+                code: "tr", name: "Turkish", nativeName: "Türkçe",
+                isSource: true, lastUpdated: nil, keyCount: nil,
+                flagUrl: nil, countryCode: nil
+            )],
+            files: nil,
+            updatedAt: nil
+        )
+        let manifestData = try JSONEncoder().encode(manifest)
+        await mockStorage.set(
+            "@better-i18n:manifest:hellospace/safa",
+            value: String(data: manifestData, encoding: .utf8)!
+        )
+
+        let messages: [String: Any] = ["widget": ["prayer_fajr": "İmsak"]]
+        let messagesData = try JSONSerialization.data(withJSONObject: messages)
+        await mockStorage.set(
+            "@better-i18n:messages:hellospace/safa:tr",
+            value: String(data: messagesData, encoding: .utf8)!
+        )
+
+        // Locale tercihi de storage'a yaz
+        await mockStorage.set("@better-i18n:locale:hellospace/safa", value: "tr")
+
+        // CDN her zaman hata dönsün — storage-only path CDN'e gitmemeli
+        let session = makeMockSession()
+        MockURLProtocol.requestHandler = { _ in
+            throw URLError(.notConnectedToInternet)
+        }
+
+        let config = I18nConfig(project: "hellospace/safa", defaultLocale: "tr", storage: mockStorage)
+        let i18n = BetterI18n(config: config, session: session)
+
+        // 1. getManifestFromStorageOnly → CDN'e gitmeden manifest döner
+        let storedManifest = await i18n.getManifestFromStorageOnly()
+        XCTAssertNotNil(storedManifest)
+        XCTAssertEqual(storedManifest?.languages.first?.code, "tr")
+
+        // 2. getTranslatorFromStorageOnly → CDN'e gitmeden translator döner
+        let translator = await i18n.getTranslatorFromStorageOnly(locale: "tr")
+        XCTAssertNotNil(translator)
+        XCTAssertEqual(translator?("widget.prayer_fajr"), "İmsak")
+
+        // 3. detectLocaleFromStorageOnly → storage tercihi döner
+        let detectedLocale = await i18n.detectLocaleFromStorageOnly()
+        XCTAssertEqual(detectedLocale, "tr")
+    }
+
     // MARK: - Storage fallback
 
     func testStorageFallbackWhenCDNFails() async throws {
