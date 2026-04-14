@@ -1,0 +1,8 @@
+# SPM build
+.build/
+.swiftpm/
+
+# Xcode
+*.xcodeproj/
+*.xcworkspace/
+DerivedData/

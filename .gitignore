@@ -2,3 +2,9 @@
 .swiftpm/
 *.xcodeproj
 DerivedData/
+
+# Graphify knowledge graph (generated)
+graphify-out/
+
+# OpenLogs (dev server logs for AI)
+.openlogs/
